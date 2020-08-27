@@ -1,0 +1,474 @@
+---
+title: "Project Time series"
+author: "Muchigi"
+date: "8/4/2020"
+output: html_document
+---
+
+1. Bring in the libraries
+
+```{r }
+
+library(tswge)
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(readxl)
+library(vars)
+library(nnfor)
+library(RColorBrewer)
+```
+
+# Prepare the data
+
+
+```{r }
+# filtering the data to United states because the data has all the continents
+df1<-read.csv("C:\\Users\\pro3\\Google Drive\\Time series\\DATA\\owid-covid-data.csv")
+
+df1<-filter(df1,location=='United States')
+
+
+#changed the data type column to date
+df1$Date <- as.Date(df1$date , format = "%m/%d/%y")
+
+
+#gave  new case data the variable test positive
+Test_positive = df1$new_cases[78:198]
+
+#gave  new test data the variable Newtest
+Newtest  = df1$new_tests [78:198]
+
+
+#calculated positive percentage
+positive_percent <- Test_positive/Newtest
+
+# removed all the N/A's
+positive_percent[is.na(positive_percent)] <- 0
+
+
+
+```
+
+## Visualized
+
+plotted newcases , new deaths, and positive rate
+
+```{r }
+# created a line graph for new cases
+ggplot(df1, aes(x=Date,y=new_cases))+geom_line(color="#69b3a2")+scale_x_date(limits = as.Date(c('2020-01-01','2020-07-20')))+ggtitle("New Cases Trend")
+
+```
+
+```{r }
+
+#created a line graph for new deaths
+ggplot(df1, aes(x=Date,y=new_deaths))+geom_line(color="#69b3a2")+scale_x_date(limits = as.Date(c('2020-01-01','2020-07-20')))+ggtitle("New Deaths Trend")
+
+
+```
+
+
+```{r }
+
+#created a line graph for positive rate ratio
+plot(positive_percent, type='l')
+
+```
+
+
+
+
+#Univariate Analysis
+
+First will check the sample plots 
+
+- we can see wondering behavior in the realisation
+- there is slowly damping in the autocorrelation
+- and we have a peak a zero in the spectral density
+- this is an indication we have some non stationary factor
+
+
+  
+
+
+```{r }
+
+#create sample plot for new cases 
+plotts.sample.wge(Test_positive)
+
+
+```
+
+
+Next step was to overfit the models with an AR 12 and to check the factor table
+```{r }
+
+#Over fit with an Ar 12, will use the burg to fit the model 
+est.ar.wge(Test_positive,p=12,type="burg")
+
+```
+
+
+Since we so evidence of a ARIMA  with 1 unit root  we decided to difference the data once
+
+```{r }
+
+#Over fit with an Ar 12, will use the burg to fit the model 
+tp2_1=artrans.wge(Test_positive,phi.tr = 1)
+
+```
+
+
+
+
+Since the realizations look like we have some seasonlity, we over fitted the data again with an Ar 16 and  an Ar 12 to look at the factor tables.
+
+We are look for similar models
+
+```{r }
+
+#Over fit with an Ar 12, will use the burg to fit the model 
+est.ar.wge(tp2_1,p=12,type="burg")
+```
+
+
+```{r }
+
+#Over fit with an  Ar16, will use the burg to fit the model 
+est.ar.wge(tp2_1,p=16,type="burg")
+```
+
+looking at the factor tables we thought that they behaved like an AR 7
+
+so we looked at the factor table for AR7
+and we so saw some similarities
+```{r }
+
+#factor table for AR7
+factor.wge(phi=c(rep(0,6),1))
+
+```
+
+
+After determining that its an AR7, we differenced the data
+```{r }
+
+#factor table for AR7
+tp2_1_7=artrans.wge(tp2_1,phi.tr = c(rep(0,6),1))
+
+```
+
+Since the model looks stationary we used the AIC.5 to pick out model.
+we are going to use AIC AICC and BIC
+
+```{r }
+
+#AIC
+aic5.wge(tp2_1_7,p=0:10,q=0:3)
+
+```
+
+```{r }
+
+#AICC
+aic5.wge(tp2_1_7,p=0:10,q=0:3,type ="aicc")
+
+```
+
+
+
+```{r }
+
+#BIC
+aic5.wge(tp2_1_7,p=0:10,q=0:3,type ="bic")
+```
+
+
+Fit the model with the BIC model Ar(6)
+
+
+```{r }
+
+#fit the model with AR(6) 
+est_tp2_1_7=est.arma.wge(tp2_1_7,p=6,q=0)
+
+est_tp2_1_7$phi
+```
+
+Look for noise in our residual
+
+ - Autocorrelation shows that the residuals are white noise
+ - And the Ijung test failed to reject that the residuals are not white noise
+ 
+    - this is because at K = 24 pval is 0.1879943
+    - this is because at K = 48 pval is 0.8812295
+```{r }
+
+#code plots the sample plots
+plotts.sample.wge(est_tp2_1_7$res,arlimits = T)
+
+#ijung test for white noise
+ljung.wge(est_tp2_1_7$res,p=6,q=0)
+ljung.wge(est_tp2_1_7$res,p=6,q=0,K=48)
+
+```
+
+The code below calculates the ASE
+
+```{r }
+
+#variable for total length of the data
+total=length(Test_positive)
+
+#days length variable
+length=15
+
+#Here we forecast 15 days ahead and cross validation
+f_tp2_1_7=fore.aruma.wge(Test_positive,phi=est_tp2_1_7$phi,theta = est_tp2_1_7$theta,s=7,d=1,n.ahead = length,lastn = T)
+
+
+```
+
+Forecast seven days ahead
+```{r }
+#below is the code for calculating the ASE
+ASE.aruma=mean((f_tp2_1_7$f-Test_positive[(total-length+1):total])^2)
+ASE.aruma
+```
+
+
+
+Forecast seven days ahead
+```{r }
+#forecast seven days ahead
+Forecast_7days=fore.aruma.wge(df1$new_cases[78:198],phi=est_tp2_1_7$phi,theta = est_tp2_1_7$theta,s=7,d=1,n.ahead = 7,lastn = F)
+
+```
+
+
+Forecast 3 months ahead
+```{r }
+#forecast seven days ahead
+Forecast_7days=fore.aruma.wge(df1$new_cases[78:198],phi=est_tp2_1_7$phi,theta = est_tp2_1_7$theta,s=7,d=1,n.ahead = 90,lastn = F)
+
+```
+
+
+
+
+#Univatiate MLP model
+
+```{R}
+#creates out train and test dataset
+ml_newcase_train = ts(df1$new_cases[78:180])
+ml_newcase_test = ts(df1$new_cases[181:198])
+```
+
+Below is where we fitted our model 
+
+```{r}
+fit3=mlp(ml_newcase_train,difforder = c(7),reps=50,comb="mean",allow.det.season = F)
+
+fit3
+```
+
+After we fitted our model we ploted our actuals with the forecast data to see how well the model did
+
+```{r}
+fore.mlp =forecast(fit3 ,h=18)
+plot(fore.mlp)
+
+```
+
+
+the plot below compares our forecast with our actual data  
+
+```{r}
+plot(df1$new_cases[181:198],type="l",)
+points(seq(181:198),fore.mlp$mean,type='b',pch=15)
+
+```
+
+Calculated ASE for the mlp model  
+```{r}
+ASE.mlp = mean((df1$new_cases[181:198]-fore.mlp$mean)^2)
+ASE.mlp
+```
+
+#Univariate Ensemble model
+
+```{r}
+r1=1-ASE.aruma/(ASE.mlp+ASE.aruma)
+r2=1-ASE.mlp/(ASE.mlp+ASE.aruma)  
+ensemble  = r1*f_tp2_1_7$f + r2*fore.mlp$mean
+
+Date<-df1$date
+plot(Test_positive[78:198] ~ Date[78:198], xaxt = "n", type = "l",xlab="Date", ylab = "Daily Test Positive", main = "20 day Mass Covid Forecast")
+
+axis(1, Date[78:198], format(Date[78:198], "%b %d"), cex.axis = .7)
+lines( ensemble  ~ Date[78:198], type = "l", col = "green")
+
+ASE = mean((Test_positive[78:198] - ensemble)^2)
+ASE
+```
+
+
+#Multivariate Time Series
+
+The next step is we are going to use a Multivariate model to predict new cases
+
+Will first us a Vector model
+
+```{r }
+
+
+# below we are preparing the data  for newcases, Newdeaths and Newtest
+Newcase1 <- df1$new_cases[1:180]
+
+Newcase1[is.na(Newcase1)] <- 0
+
+Newdeaths <- df1$new_deaths[1:180]
+
+Newdeaths[is.na(Newdeaths)] <- 0
+
+Newtest1 <- df1$new_tests[1:180]
+
+Newtest1[is.na(Newtest1)]<-0
+
+#After creating the variable we combined them for our model
+x <-cbind(Newcase1,Newdeaths,Newtest1)
+
+
+
+
+```
+
+
+Used Varselect to pick out our model
+ - Model picked a p = 12
+```{r pressure, echo=FALSE}
+
+# here we are making varselect pick out our model
+VARselect(x,lag.max = 12,type = "const",season = NULL,exogen = NULL)
+
+
+
+```
+
+
+Predictes 18 days ahead
+```{r}
+
+lsfit2=VAR(x,p=12,type = 'const')
+
+pred = predict(lsfit2,n.ahead = 18)
+
+```
+
+the plot below compares our forecast with our actual data  
+
+```{r pressure, echo=FALSE}
+
+plot(df1$new_cases[181:198],type="l",)
+points(seq(181:198),pred$fcst$Newcase1[1:18,1],type='b',pch=15)
+
+```
+
+Got the ASE for the model
+
+- it performed better than the univariate model
+```{r pressure, echo=FALSE}
+#ASE calculation
+ASE=mean((pred$fcst$Newcase1[1:18,1]-df1$new_cases[181:198])^2)
+ASE
+```
+
+
+
+Forecast seven days ahead
+```{r }
+pred = predict(lsfit2,n.ahead = 7)
+fanchart(pred, colors =brewer.pal(n=8,name = "Blues"))
+
+```
+
+
+Forecast 90 days ahead
+```{r }
+pred = predict(lsfit2,n.ahead = 90)
+fanchart(pred, colors =brewer.pal(n=8,name = "Blues"))
+
+```
+
+
+
+# MLP model
+
+The below process is for Modeling the newcase dataset with ML to see if will get better results
+
+Prepared the data
+
+```{r }
+
+#creates out train and test dataset
+ml_newcase_train = ts(df1$new_cases[1:180])
+ml_newcase_test = ts(df1$new_cases[181:198])
+
+# here we combine out explainable variables
+Combine=data.frame(Newdeaths1=ts(df1$new_deaths),Tests =ts(df1$new_tests))
+
+#removed Na's from out test dataset
+Combine$Tests[is.na(Combine$Tests)]<-0
+
+
+```
+
+
+Below is where we fitted our model 
+
+```{r }
+
+fit3=mlp(ml_newcase_train,difforder = c(7), xreg=Combine,reps=100,comb="mean")
+
+fit3
+
+```
+
+
+After we fitted our model we ploted our actuals with the forecast data to see how well the model did
+```{r }
+
+fore.mlp =forecast(fit3,xreg =Combine ,h=18)
+plot(fore.mlp)
+
+```
+
+
+
+plot actuals verses predicted realization
+```{r}
+
+plot(df1$new_cases[181:198],type="l",)
+points(seq(181:198),fore.mlp$mean,type='b',pch=15)
+
+```
+
+
+
+Calculated the ASE for our mlp model
+
+- the mlp perfored worse
+
+
+```{r }
+
+ASE = mean((df1$new_cases[181:198]-fore.mlp$mean)^2)
+ASE
+```
+
+
+
+
+
+
